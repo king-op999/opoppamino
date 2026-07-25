@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 import requests
 import time
+import json
 from datetime import datetime, timedelta
 import os
 
@@ -10,8 +11,10 @@ CREDIT = "@BRONX_ULTRA"
 DEVELOPER = "@BRONX_ULTRA"
 
 # ============ REAL API URLs ============
-BOMBER_API = "https://ft-osint-api.duckdns.org/api/bomber"  # 👈 REAL BOMBER API
+BOMBER_API = "https://ft-osint-api.duckdns.org/api/bomber"
 PAN_API = "https://ft-osint-api.duckdns.org/api/paninfo"
+UPI_API_1 = "https://bronx-web-api.onrender.com/api/key-bronx/upi"
+UPI_API_2 = "https://god-level-upi-info.onrender.com/api/upi"
 
 # ============ 🔐 KEY DATABASE ============
 KEYS_DB = {
@@ -62,9 +65,12 @@ def deep_clean(data):
         for field in blacklist:
             data.pop(field, None)
         
-        data['credit'] = CREDIT
-        data['by'] = CREDIT
-        data['developer'] = DEVELOPER
+        if 'credit' not in data:
+            data['credit'] = CREDIT
+        if 'by' not in data:
+            data['by'] = CREDIT
+        if 'developer' not in data:
+            data['developer'] = DEVELOPER
         
         for key in list(data.keys()):
             if isinstance(data[key], dict):
@@ -123,21 +129,30 @@ body{{background:#000a14;color:#d0d8f0;font-family:'Courier New',monospace;min-h
 h1{{font-size:24px;background:linear-gradient(90deg,#ff0055,#ff8800);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:15px}}
 .box{{background:rgba(0,0,0,.6);border:1px solid rgba(255,0,85,.1);border-radius:12px;padding:15px;margin:12px 0;text-align:left}}
 code{{color:#ff8800;font-size:11px;display:block;margin:8px 0;background:rgba(0,0,0,.5);padding:10px;border-radius:8px;word-break:break-all}}
-input{{width:100%;padding:12px;background:rgba(0,0,0,.7);border:1px solid rgba(255,0,85,.2);border-radius:8px;color:#fff;font-size:14px;outline:none;margin:6px 0}}
-input:focus{{border-color:#ff0055;box-shadow:0 0 10px rgba(255,0,85,.2)}}
+input,select{{width:100%;padding:12px;background:rgba(0,0,0,.7);border:1px solid rgba(255,0,85,.2);border-radius:8px;color:#fff;font-size:14px;outline:none;margin:6px 0}}
+input:focus,select:focus{{border-color:#ff0055;box-shadow:0 0 10px rgba(255,0,85,.2)}}
 button{{width:100%;padding:14px;background:linear-gradient(135deg,#ff0055,#cc0044);color:#fff;border:none;border-radius:10px;font-weight:700;cursor:pointer;font-size:14px;margin:8px 0;transition:.3s}}
 button:hover{{transform:scale(1.02);box-shadow:0 0 30px rgba(255,0,85,.4)}}
 .btn-pan{{background:linear-gradient(135deg,#ff8800,#cc6600)}}
+.btn-upi{{background:linear-gradient(135deg,#8800ff,#6600cc)}}
 .result{{background:rgba(0,0,0,.7);border:1px solid rgba(255,136,0,.2);border-radius:10px;padding:15px;margin-top:15px;text-align:left;display:none;max-height:500px;overflow:auto}}
 .result.show{{display:block}}
 pre{{color:#ff8800;font-size:10px;white-space:pre-wrap}}
 .loading{{color:#ffb400;animation:blink 1s infinite}}
 @keyframes blink{{50%{{opacity:0.5}}}}
+.tag{{display:inline-block;padding:4px 10px;border-radius:4px;font-size:9px;margin:2px;font-weight:700}}
+.tag-bomber{{background:rgba(255,0,85,.2);color:#ff0055;border:1px solid rgba(255,0,85,.3)}}
+.tag-pan{{background:rgba(255,136,0,.2);color:#ff8800;border:1px solid rgba(255,136,0,.3)}}
+.tag-upi{{background:rgba(136,0,255,.2);color:#a855f7;border:1px solid rgba(136,0,255,.3)}}
 </style></head>
 <body>
 <div class="card">
 <h1>🚀 BRONX ULTRA API</h1>
-<p style="color:#888;font-size:11px;margin-bottom:15px">REAL BOMBER + PAN API</p>
+<p style="color:#888;font-size:11px;margin-bottom:15px">
+<span class="tag tag-bomber">BOMBER</span>
+<span class="tag tag-pan">PAN</span>
+<span class="tag tag-upi">UPI DUAL</span>
+</p>
 
 <div class="box">
 <p style="color:#ff0055;font-weight:700;margin-bottom:8px">🔑 API Key</p>
@@ -145,8 +160,8 @@ pre{{color:#ff8800;font-size:10px;white-space:pre-wrap}}
 </div>
 
 <div class="box">
-<p style="color:#ff8800;font-weight:700;margin-bottom:8px">📱 Mobile Number / PAN</p>
-<input type="text" id="inputValue" placeholder="9876543210 or BNZPM2501F">
+<p style="color:#ff8800;font-weight:700;margin-bottom:8px">🎯 Target / Query</p>
+<input type="text" id="inputValue" placeholder="9876543210 or BNZPM2501F or example@ybl">
 </div>
 
 <div class="box" id="counterBox" style="display:none">
@@ -156,11 +171,12 @@ pre{{color:#ff8800;font-size:10px;white-space:pre-wrap}}
 
 <button onclick="callBomber()">💣 START BOMBER</button>
 <button class="btn-pan" onclick="callPan()">🪪 CHECK PAN</button>
+<button class="btn-upi" onclick="callUpi()">📱 UPI DUAL LOOKUP</button>
 
 <div class="result" id="result">
 <pre id="resultData"></pre>
 </div>
-<p style="color:#555;font-size:9px;margin-top:15px">{CREDIT} | REAL API BACKEND</p>
+<p style="color:#555;font-size:9px;margin-top:15px">{CREDIT} | BOMBER + PAN + UPI API</p>
 </div>
 
 <script>
@@ -187,15 +203,28 @@ var j=await r.json();p.className='';p.style.color='#ff8800';p.textContent=JSON.s
 }}catch(e){{p.className='';p.style.color='#ff3366';p.textContent='Error: '+e.message}}
 }}
 
+async function callUpi(){{
+var k=document.getElementById('apiKey').value.trim();if(!k)return alert('API Key required!');
+var n=document.getElementById('inputValue').value.trim();if(!n||!n.includes('@'))return alert('Valid UPI ID required (e.g., name@oksbi)!');
+var d=document.getElementById('result'),p=document.getElementById('resultData');
+d.classList.add('show');p.className='loading';p.textContent='📱 Calling DUAL UPI APIs... Please wait...\\n[1/2] Fetching from API 1...';
+try{{
+var r=await fetch('/upi?key='+encodeURIComponent(k)+'&upi='+encodeURIComponent(n));
+var j=await r.json();p.className='';p.style.color='#a855f7';p.textContent=JSON.stringify(j,null,2)
+}}catch(e){{p.className='';p.style.color='#ff3366';p.textContent='Error: '+e.message}}
+}}
+
 document.getElementById('inputValue').addEventListener('input',function(){{
-if(this.value.match(/^\\d+$/)) document.getElementById('counterBox').style.display='block';
-else document.getElementById('counterBox').style.display='none';
+var v=this.value;
+if(v.match(/^\\d+$/)){{document.getElementById('counterBox').style.display='block'}}
+else if(v.includes('@')){{document.getElementById('counterBox').style.display='none'}}
+else{{document.getElementById('counterBox').style.display='none'}}
 }});
 </script>
 </body></html>'''
 
 
-# ============ 💣 SMS BOMBER - REAL API ============
+# ============ 💣 SMS BOMBER ============
 @app.route('/ultra')
 def ultra_bomber():
     key = request.args.get('key', '').strip()
@@ -217,11 +246,10 @@ def ultra_bomber():
     
     start_time = time.time()
     
-    # 👇 REAL BOMBER API CALL
     real_url = f"{BOMBER_API}?key=bronx-ultra-king-ft-bro-op&number={number}&counter={counter}"
     
     try:
-        response = requests.get(real_url, timeout=90)  # 90 sec for bomber
+        response = requests.get(real_url, timeout=90)
         data = response.json()
         
         if isinstance(data, dict):
@@ -252,7 +280,7 @@ def ultra_bomber():
         })
 
 
-# ============ 🪪 PAN INFO - REAL API ============
+# ============ 🪪 PAN INFO ============
 @app.route('/pan')
 def pan_info():
     key = request.args.get('key', '').strip()
@@ -268,7 +296,6 @@ def pan_info():
     
     start_time = time.time()
     
-    # 👇 REAL PAN API CALL
     real_url = f"{PAN_API}?key=bronx-ultra-king-ft-bro-op&pan={pan}"
     
     try:
@@ -277,12 +304,6 @@ def pan_info():
         
         if isinstance(data, dict):
             data = deep_clean(data)
-            
-            if 'source_1' in data:
-                lead = data['source_1'].get('existing_lead', {})
-                if 'error' in lead:
-                    lead['error'] = "Request failed"
-            
             elapsed = round((time.time() - start_time) * 1000)
             data['response_time_ms'] = elapsed
             data['plan'] = key_check['type']
@@ -305,14 +326,154 @@ def pan_info():
         }), 500
 
 
+# ============ 📱 UPI DUAL LOOKUP ============
+@app.route('/upi')
+def upi_dual():
+    """UPI Dual API - Pehle API 1, phir API 2 ka response"""
+    key = request.args.get('key', '').strip()
+    
+    key_check = verify_key(key)
+    if not key_check['valid']:
+        return jsonify({"success": False, "error": key_check['error'], "credit": CREDIT}), 401
+    
+    upi_id = request.args.get('upi', '').strip()
+    
+    if not upi_id or '@' not in upi_id:
+        return jsonify({
+            "success": False,
+            "error": "Valid UPI ID required (e.g., name@oksbi)!",
+            "credit": CREDIT
+        }), 400
+    
+    start_time = time.time()
+    
+    # ===== API 1: BRONX UPI API =====
+    api1_url = f"{UPI_API_1}?key=op&upi={upi_id}"
+    api1_data = None
+    api1_success = False
+    api1_time = 0
+    
+    try:
+        t1 = time.time()
+        resp1 = requests.get(api1_url, timeout=30, verify=False)
+        api1_time = round((time.time() - t1) * 1000)
+        if resp1.status_code == 200:
+            try:
+                api1_data = resp1.json()
+                api1_data = deep_clean(api1_data)
+                api1_success = True
+            except:
+                api1_data = {"raw": resp1.text[:1000]}
+        else:
+            api1_data = {"error": f"Status: {resp1.status_code}", "status_code": resp1.status_code}
+    except requests.exceptions.Timeout:
+        api1_data = {"error": "API 1 Timeout (30s)"}
+        api1_time = 30000
+    except Exception as e:
+        api1_data = {"error": str(e)}
+    
+    # ===== API 2: GOD LEVEL UPI API =====
+    api2_url = f"{UPI_API_2}?upi_id={upi_id}&key=456"
+    api2_data = None
+    api2_success = False
+    api2_time = 0
+    
+    try:
+        t2 = time.time()
+        resp2 = requests.get(api2_url, timeout=30, verify=False)
+        api2_time = round((time.time() - t2) * 1000)
+        if resp2.status_code == 200:
+            try:
+                api2_data = resp2.json()
+                api2_data = deep_clean(api2_data)
+                api2_success = True
+            except:
+                api2_data = {"raw": resp2.text[:1000]}
+        else:
+            api2_data = {"error": f"Status: {resp2.status_code}", "status_code": resp2.status_code}
+    except requests.exceptions.Timeout:
+        api2_data = {"error": "API 2 Timeout (30s)"}
+        api2_time = 30000
+    except Exception as e:
+        api2_data = {"error": str(e)}
+    
+    # ===== MERGE BOTH RESULTS =====
+    total_time = round((time.time() - start_time) * 1000)
+    
+    # Try to merge name/bank info from both
+    merged_name = None
+    merged_bank = None
+    
+    # Extract name from API 1
+    if api1_success and isinstance(api1_data, dict):
+        merged_name = api1_data.get('name') or api1_data.get('account_holder') or api1_data.get('owner_name')
+        merged_bank = api1_data.get('bank') or api1_data.get('bank_name')
+    
+    # Extract name from API 2 if not found
+    if not merged_name and api2_success and isinstance(api2_data, dict):
+        result_data = api2_data.get('result', {}) or api2_data
+        merged_name = result_data.get('name') or result_data.get('owner_name') or result_data.get('account_holder')
+        if not merged_bank:
+            bank_info = result_data.get('bank_info', {}) or result_data.get('bank_details', {}) or {}
+            merged_bank = bank_info.get('bank_name') or bank_info.get('bank') or result_data.get('bank')
+    
+    # Also get from nested structures
+    if not merged_name and api1_data:
+        for key in ['data', 'result', 'vpa_details', 'owner_details', 'upi_info']:
+            nested = api1_data.get(key, {})
+            if isinstance(nested, dict):
+                merged_name = nested.get('name') or nested.get('owner') or nested.get('account_name') or merged_name
+    
+    if not merged_name and api2_data:
+        for key in ['data', 'result', 'vpa_details', 'owner_details', 'upi_info']:
+            nested = api2_data.get(key, {})
+            if isinstance(nested, dict):
+                merged_name = nested.get('name') or nested.get('owner') or nested.get('account_name') or merged_name
+    
+    final_response = {
+        "success": api1_success or api2_success,
+        "query": upi_id,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "total_response_time_ms": total_time,
+        
+        "merged_result": {
+            "name": merged_name,
+            "bank": merged_bank,
+            "sources_found": sum([api1_success, api2_success]),
+        },
+        
+        "api_1": {
+            "source": "BRONX UPI API",
+            "success": api1_success,
+            "response_time_ms": api1_time,
+            "data": api1_data
+        },
+        
+        "api_2": {
+            "source": "GOD LEVEL UPI API",
+            "success": api2_success,
+            "response_time_ms": api2_time,
+            "data": api2_data
+        },
+        
+        "plan": key_check['type'],
+        "credit": CREDIT
+    }
+    
+    return jsonify(final_response)
+
+
 # ============ 💚 HEALTH CHECK ============
 @app.route('/health')
 def health():
     return jsonify({
         "status": "✅ ONLINE",
-        "version": "5.0",
-        "bomber_api": "/api/bomber",
-        "pan_api": "/api/paninfo",
+        "version": "6.0",
+        "endpoints": {
+            "bomber": "/ultra?key=KEY&number=NUMBER&counter=100",
+            "pan": "/pan?key=KEY&pan=PAN_NUMBER",
+            "upi_dual": "/upi?key=KEY&upi=example@oksbi"
+        },
         "credit": CREDIT
     })
 
@@ -324,5 +485,6 @@ def not_found(e):
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
-    print(f"🔥 BRONX ULTRA API :{port}")
+    print(f"🔥 BRONX ULTRA API v6.0 :{port}")
+    print(f"   💣 Bomber | 🪪 PAN | 📱 UPI Dual")
     app.run(host='0.0.0.0', port=port)
